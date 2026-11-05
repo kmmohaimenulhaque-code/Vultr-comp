@@ -228,6 +228,22 @@ Design tokens on `:root` with a dark theme; responsive grid (2×2 cells → stac
 - **Explorer / finding** — deterministic robustness sweep after the claim probe (SPEC §7.5); findings are evidence shown in the Robustness column, not penalties (only G6 affects a verdict).
 - **Live badge** — Mode L result: ✅ LIVE OK · 🟡 LIVE MISMATCH · ❌ DEAD LINK · 🔒 NEEDS LOGIN · ⚫ UNVERIFIABLE. Shown beside the tier; never changes it.
 
+## 15. Parallel sessions
+
+Three Claude sessions work in separate git worktrees. **A session edits ONLY its own paths.** Anything else → write a note in
+`docs/handoff-notes.md` (who needs what, why, which file) and tell MHA. Shared schemas are changed only by Session B.
+
+| Session | Branch · worktree | Owns (may edit) | Slices |
+|---|---|---|---|
+| **A — sandbox** | `feat/sandbox` · `../proofrun-sandbox` | `deploy/*`, `sandbox/*` (incl. `harness/explorer.py`, web-probe container), `fixtures/*`, `orchestrator/sandbox/*`, `orchestrator/evidence/{canary,sinkhole}.py`, Makefile targets for image / pod / firewall / containment | S1–S4, S6c (Explorer), Mode L container part of S6b, S10 deploy |
+| **B — core** | `feat/core` · `../proofrun-core` | `orchestrator/{models,config,jobs,queue,db,cli,safe_fs,main}.py`, `orchestrator/policy/*`, `orchestrator/agents/*`, `orchestrator/evidence/{flags,tiers,receipts}.py`, `scripts/verify_receipt.py`, `tests/unit/*` | S5, S6, S7, S8, CSV import + SSRF guard of S6b |
+| **C — ui** | `feat/ui` · `../proofrun-ui` | `web/*`, UI test fixtures (mock SSE + mock receipts in `web/mock/`) | S9 |
+
+- **Session B owns `orchestrator/models.py`** — all shared schemas (RunPlan, ClaimVerdict, Receipt, Event, Flag, Explore findings, SSE events) — and **commits it FIRST**; A and C build against it.
+- **Integration:** MHA merges `feat/*` into `main` in the main worktree (`/opt/proofrun`) at checkpoints; sessions then `git rebase main`.
+- Only Session B runs `make test`. Only Session A uses Docker heavily.
+- Paths not listed (e.g. `docs/*`, `README.md`, `pyproject.toml`, `scripts/*` other than `verify_receipt.py`, `tests/integration/*`, `skills/vendor/*`, `showroom/*`) → ask MHA before editing.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
