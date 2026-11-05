@@ -94,7 +94,7 @@ proofrun/
 │  └─ evidence/  canary.py  sinkhole.py  flags.py  tiers.py  receipts.py
 ├─ sandbox/
 │  ├─ Dockerfile
-│  ├─ harness/   holder.py  probe_runner.py  pr_api.py
+│  ├─ harness/   holder.py  probe_runner.py  pr_api.py  explorer.py
 │  ├─ hooks/     net-hook.cjs  sitecustomize.py
 │  └─ samples/   sample.csv  sample.png  sample.pdf  sample.txt
 ├─ fixtures/     clean/  broken-env/  vaporware/  evil-submission/   (each with FIXTURE.md)
@@ -122,6 +122,7 @@ Work top to bottom. A slice is done only when its check passes; then commit and 
 | S5 | Policy gate: commands, README blocks, probe AST, patch — with tests | §8 | Unit tests: every rule has a malicious and a benign case |
 | S6 | Agents: `llm.py` (model check, cost, budget, mock mode), Planner, Prober, Fixer, Verifier + guards; vendor 1–2 pinned skills (MHA approves each) | §7, §2 P0.11 | Mock-mode tests pass; live run: F1 🟢, F2 🔵, F3 🟡, F4 🔴 |
 | S6b | Mode L + CSV import (~4–5 h): web-probe on `proofrun-web`, `policy/ssrf.py`, live badges in `tiers.py`, `batch_csv.py` + CLI + `POST /api/batches/csv` | §5.8, §12 | SSRF unit tests (private/loopback/link-local/metadata/CGNAT + redirect) fail closed; badge table tests; a test CSV imports with every rejected row reported |
+| S6c | Explorer quick mode (~4–5 h): `sandbox/harness/explorer.py`, findings + coverage in receipt, guard G6, Robustness data for the board | §7.5, §7.4 G6 | Explorer tests (§10) pass; F1 and one live URL show findings + "explored X of Y" in the receipt |
 | S7 | Tier engine, receipts (sign/verify), approvals, job state machine, SQLite | §4, §9, §10 | Table tests for every tier rule; `verify_receipt.py` validates a real receipt and rejects a tampered one |
 | S8 | API, SSE, queue, rate limits, budget | §12 | Showdown runs 4 jobs in parallel; 5th request gets 202 + live ids; limits enforced |
 | S9 | Web UI: mission control, board, drawer, showroom, approve | §13 | Usable on a phone; no `innerHTML` with dynamic data; CSP active |
@@ -176,7 +177,9 @@ Required unit tests (must exist before the related slice is "done"):
 - `evidence.receipts`: sign → verify round trip; one-byte tamper fails; canonicalization stable.
 - `policy.ssrf`: private, loopback, link-local, metadata, CGNAT, IPv6 equivalents and a redirect to any of them are rejected; a public host passes.
 - `batch_csv`: wrong header rejects the file; each bad row (id, URL, missing both URLs, oversize description, duplicate id) is reported with row number; good rows still listed.
-- `agents.verifier` guards G1–G5 with mocked model outputs (including a model that says VERIFIED when G3 applies).
+- `agents.verifier` guards G1–G6 with mocked model outputs (including a model that says VERIFIED when G3 applies, and G6 from a high finding on a claim-linked element).
+- `explorer`: determinism (same app twice → identical action order and state hashes); budget enforcement (stops at actions/pages/seconds limits, never at the first finding);
+  destructive controls clicked last in Mode R and skipped + listed in Mode L; no form submit in Mode L unless `EXPLORE_LIVE_SUBMIT=1`; airgap tagging (sinkhole hit in the window → `airgap`, excluded from counts and G6); dedupe + 50 cap.
 Integration (needs Docker on the VM): `pod-hello`, `test-containment`, `showdown` with `MOCK_LLM=1` and with the real API.
 Run `make lint test` before every commit; run integration tests before marking a slice done.
 ## 11. Frontend conventions
@@ -205,6 +208,7 @@ Design tokens on `:root` with a dark theme; responsive grid (2×2 cells → stac
 - [ ] S5 Policy gate + tests
 - [ ] S6 Agents + guards (F1 🟢 · F2 🔵 · F3 🟡 · F4 🔴) · pinned skills vendored (MHA-approved)
 - [ ] S6b Mode L (P0-light) + CSV import · SSRF guard · live badges
+- [ ] S6c Explorer quick mode · findings · G6 · coverage
 - [ ] S7 Tiers · receipts · approvals · state machine
 - [ ] S8 API · SSE · queue · limits
 - [ ] S9 Web UI
@@ -221,6 +225,7 @@ Design tokens on `:root` with a dark theme; responsive grid (2×2 cells → stac
 - **Attempt 1 / 2** — out-of-the-box run / run after the single Fixer patch.
 - **Tier** — 🔴 Quarantined · ⚫ Needs human · 🟡 Claim mismatch · 🔵 Runs after a small fix · 🟢 Verified (SPEC §9). Always "Proposed" until approved.
 - **Mode R / Mode L** — repo run (P0) / live-URL check (P0-light; site-login vault is P1).
+- **Explorer / finding** — deterministic robustness sweep after the claim probe (SPEC §7.5); findings are evidence shown in the Robustness column, not penalties (only G6 affects a verdict).
 - **Live badge** — Mode L result: ✅ LIVE OK · 🟡 LIVE MISMATCH · ❌ DEAD LINK · 🔒 NEEDS LOGIN · ⚫ UNVERIFIABLE. Shown beside the tier; never changes it.
 
 ## graphify

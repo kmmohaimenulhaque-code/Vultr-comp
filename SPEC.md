@@ -1,9 +1,10 @@
 Spec · MD
-# ProofRun — Locked Spec v1.1
+# ProofRun — Locked Spec v1.2
  
 > **Status: LOCKED** on Wed 4 Nov 2026, 21:15 Asia/Dhaka. Owner: MHA.
 > Any change needs MHA's explicit OK and a new line in §18 (Decision log).
 > **v1.1** amended Thu 5 Nov 2026 with MHA's OK: D17–D20 (VM, Mode L P0-light, CSV import, pinned skills).
+> **v1.2** amended Thu 5 Nov 2026 with MHA's OK: D21 (deterministic Explorer / robustness sweep, §7.5).
 > Hackathon: **Vultr: Agent Rush** (lablab.ai) · Track: **Blast Radius Zero** · Patterns **A + B**.
 > **Internal submission deadline: Sun 8 Nov 2026, 09:00 Asia/Dhaka.** The portal has shown conflicting
 > times (9:00 AM Bangladesh time, 6:00 PM EST, 22:00 UTC); 09:00 Dhaka is the earliest reading, so it is safe under all of them.
@@ -45,7 +46,8 @@ the user's own logged-in browser and remain prompt-injectable, so they can't saf
 **Motivating scenario.** Local NASA Space Apps judges must screen a large batch (~600) of submissions correctly within ~2 days.
 Most entries link a repo and a live demo. The organizer imports one CSV (§12); ProofRun checks every live URL (Mode L, §5.8) and runs
 the repos (Mode R), then judges work down a sortable, filterable cohort board instead of opening 600 links by hand.
-**Throughput is an ESTIMATE, to be measured:** with 4 slots, ~600 repo runs ≈ 12–13 h; live-URL checks are faster (no build).
+**Throughput is an ESTIMATE, to be measured:** with 4 slots, ~600 repo runs ≈ 12–13 h without the Explorer, ≈ 15–16 h with Explorer quick mode
+(+70 s per job); live-URL checks are faster (no build; ≈ 3 h extra for 600 with quick explore at 4 concurrent).
 Never present these figures as results; only receipts from measured runs count.
  
 **Never claim:** "injection-proof", "replaces judges", "Vultr recommends gVisor", "detects every exfiltration attempt",
@@ -69,9 +71,10 @@ or any number that wasn't measured in a recorded run.
 11. **1–2 agent skills vendored at build time** into `skills/vendor/<name>/` at a pinned commit; folded into the Prober prompt.
     No runtime installation. Source, commit SHA and license in `skills/vendor/SOURCES.md`; MHA approves each one before it is vendored.
     Vendored text is trusted-after-review (reviewed once by MHA or Claude); bundled scripts are **never executed**.
+12. **Explorer quick mode** (§7.5): deterministic robustness sweep after the claim probe, Mode R and Mode L, equal budget for every project.
 **P1 — only after P0 is green and MHA says go:** Mode L site-login vault (`pr.login`, class C) · replay with locked
 inputs · Stage 1 allowlist egress proxy · committed-secret scan · runtime skill installer (allowlisted sources, pinned SHA,
-shown in receipts, human approval per install).
+shown in receipts, human approval per install) · Explorer `full` mode (§7.5).
  
 **P2 — slides / "future work":** brokered API secrets for Mode R · "does the live demo come from this code?" match ·
 gVisor runtime · decoy credential files · TLS-inspecting sinkhole · private repos · Docker Compose submissions.
@@ -135,7 +138,7 @@ Judge / organizer browser
 | CSV import | `orchestrator/batch_csv.py` | Parse + validate batch CSV (§12) |
 | Vendored skills | `skills/vendor/<name>/`, `skills/vendor/SOURCES.md` | Pinned build-time skills (§2 P0.11) |
 | Sandbox image | `sandbox/Dockerfile` | §5.1 |
-| In-sandbox code | `sandbox/harness/{holder.py,probe_runner.py}`, `sandbox/hooks/{net-hook.cjs,sitecustomize.py}` | Sinkhole, probe harness, hooks |
+| In-sandbox code | `sandbox/harness/{holder.py,probe_runner.py,explorer.py}`, `sandbox/hooks/{net-hook.cjs,sitecustomize.py}` | Sinkhole, probe harness, hooks |
 | Web UI | `web/{index.html,app.js,styles.css}` | §13 |
 | Deploy | `deploy/*` | §14 |
  
@@ -158,10 +161,11 @@ QUEUED → FETCH → SCAN → PLAN → BUILD → RUN → PROBE → VERIFY → TI
 | SCAN + PLAN | 45 s |
 | BUILD | 240 s |
 | RUN: wait for port | 45 s |
-| PROBE | 40 s |
-| Stage 2 hard wall clock (kill) | 100 s |
+| PROBE (claims) | 40 s |
+| EXPLORE (§7.5, once per job) | quick 60 s · full 150 s · off 0 |
+| Stage 2 hard wall clock (kill) | 100 s + explore extra (quick +70 s · full +160 s) — config `STAGE2_WALL_S`, `EXPLORE_EXTRA_S_*` |
 | VERIFY (all claims) | 60 s |
-| Whole job incl. one retry | 12 min |
+| Whole job incl. one retry | 12 min + explore extra (≈ 13.5 min quick · ≈ 15 min full) |
  
 ---
  
@@ -186,8 +190,8 @@ kill on timeout · labels `proofrun.job=<id>`, `proofrun.stage=<stage>` · `runt
 | **build** (Stage 1) | `proofrun-build` | slot → `/workspace` rw | `/tmp` 1g, `/home/runner` 1g | 2 CPU · 3 GB (swap = mem) · pids 512 · 240 s | build env (§5.6) — **no secrets, no canaries** |
 | **holder** (Stage 2) | `none` | job `holder/` → `/out` rw | `/tmp` 16m | 0.25 CPU · 128 MB · pids 32 | — |
 | **app** (Stage 2) | `container:<holder>` | slot → `/workspace` rw | `/tmp` 256m noexec,nosuid · `/home/runner` 256m noexec,nosuid | 1 CPU · 1.5 GB (swap = mem) · **pids 128** · 100 s | app env (§6.2) |
-| **probe** (Stage 2) | `container:<holder>` | job `probe/` → `/out` rw; `probe.py` → `/probe/probe.py` ro | `/tmp` 256m, `/home/runner` 256m | 1 CPU · 1.5 GB · pids 512 · shm 512m · 60 s | probe env |
-| **web-probe** (Mode L, P0-light) | `proofrun-web` | job `probe/` → `/out` rw; (P1 only: bound creds → `/run/secrets/site.json` ro) | `/tmp` 256m | 1 CPU · 1.5 GB · pids 512 · shm 512m · 90 s | — |
+| **probe** (Stage 2) | `container:<holder>` | job `probe/` → `/out` rw; `probe.py` → `/probe/probe.py` ro | `/tmp` 256m, `/home/runner` 256m | 1 CPU · 1.5 GB · pids 512 · shm 512m · 60 s (+ explore extra) | probe env |
+| **web-probe** (Mode L, P0-light) | `proofrun-web` | job `probe/` → `/out` rw; (P1 only: bound creds → `/run/secrets/site.json` ro) | `/tmp` 256m | 1 CPU · 1.5 GB · pids 512 · shm 512m · 90 s (+ explore extra) | — |
  
 Notes:
 - Chromium lives in the probe container, not the app container, so the app's 128-PID cap stays meaningful and a fork bomb never takes the browser down.
@@ -350,7 +354,7 @@ Input: claims, port, baseline DOM summary (≤ 150 interactive elements: role, a
 Output: Python source with exactly one `async def probe(page, pr):`. Validated by the AST gate (§8.3), run by `probe_runner.py`.
 Vendored skill text (§2 P0.11) is appended to the Prober's system prompt as trusted guidance; its name + commit SHA go into the receipt.
 Harness API `pr`: `pr.claim(id)` (async context manager; harness auto-captures before/after shots, console, page errors, failed requests per claim) ·
-`pr.shot(label)` · `pr.expect_visible(locator)` · `pr.expect_text(text)` · `pr.sample_file(kind)` (`csv|png|pdf|txt`, baked files) · `pr.login(alias)` (Mode L, P1).
+`pr.shot(label)` · `pr.expect_visible(locator)` · `pr.expect_text(text)` · `pr.sample_file(kind)` (`csv|png|pdf|txt|big`, baked files; `big` = 20 MB, used by the Explorer) · `pr.login(alias)` (Mode L, P1).
 The harness also records which port actually answered (candidate scan: plan port, 3000, 5000, 5173, 8000, 8080, 8501, 4321) — "README said 5000, app listened on 8080" is evidence.
  
 ### 7.3 Fixer → unified diff (Self-Healing Runner)
@@ -369,7 +373,46 @@ HTTP statuses, sanitized DOM excerpt).
 - **G3** uncaught page error, or HTTP ≥ 500 on a request triggered by the claim's action (and not G2) → `CONTRADICTED`, whatever the model said.
 - **G4** model mismatch → `UNVERIFIABLE (model)`.
 - **G5** invalid JSON after repair, or budget exhausted → `UNVERIFIABLE (verifier)`.
+- **G6** an Explorer finding (§7.5) with severity `high`, not tagged `airgap`, on a **claim-linked element** → `CONTRADICTED`. Claim-linked = the harness
+  recorded the element's selector inside that claim's `pr.claim(id)` window. Applied after G1–G5; G2 still wins (airgap is never CONTRADICTED).
 - The model may **lower** a verdict (blank page, error overlay, "coming soon" placeholder) but can never raise it above what the guards allow.
+
+### 7.5 Explorer (robustness sweep)
+Runs once per job **after the claim probe**, in the same probe / web-probe container, on the last attempt that booted (Mode R) or the live URL (Mode L).
+- **Deterministic harness code** (`sandbox/harness/explorer.py`), **not LLM-generated**. Same budget for every project (fairness).
+- **Budgets** (config `EXPLORE_MODE`): `quick` = 25 actions / 8 pages / 60 s (P0) · `full` = 60 actions / 20 pages / 150 s (P1) · `off`.
+  Never stops at the first finding; it uses the whole budget.
+- **Discovery:** visible interactive elements by accessibility role (buttons, same-origin links, inputs, selects, forms); BFS over pages/states;
+  states deduped by a normalized DOM hash (text, roles, attributes; volatile ids/timestamps stripped). **Ordering is deterministic** (page BFS order, then DOM order),
+  so the same app gives the same action sequence.
+- **Actions:** click every element. Inputs/forms get a fixed edge-case set: empty · whitespace · `0` · `-1` · very large number · 5,000-char string ·
+  unicode/emoji · HTML/script-like text (**rendered-escape check only**, no exploitation) · SQL-like quote string · invalid email · past/future dates ·
+  wrong file type and oversized file via `pr.sample_file`. Plus double-click, rapid repeat (3×), browser back, and one pass at 375 px width.
+- **Destructive controls** (text or accessible name matches `delete|remove|logout|sign out|pay|purchase|checkout|send|email|unsubscribe|reset`, case-insensitive):
+  Mode R → clicked **last** (disposable sandbox) · Mode L → **skipped**, listed as "not exercised (live site safety)".
+- **Mode L extras:** same-origin only; SSRF guard (§5.8) on every navigation. **No form submission** that could create/modify data unless the batch sets
+  `EXPLORE_LIVE_SUBMIT=1` (default off; CLI `--explore-live-submit`) — fields may be filled and checked, never submitted.
+- **LLM role (optional, inside the budget):** the Prober may add ≤ 5 targeted edge cases derived from claims (same AST gate §8.3). The vision model is called
+  **only** on states with a finding (≤ 5 calls per job); it may add an `observed` note or lower a severity, never raise it.
+
+**Findings** (evidence, stored in the receipt under `explore`; they are **not flags** and never trigger quarantine):
+
+| Code | Default severity | Detected when |
+|---|---|---|
+| `CRASH` | high | Uncaught page error after an action |
+| `SERVER_ERROR` | high | HTTP ≥ 500 on a request triggered by the action |
+| `UNHANDLED_INPUT` | medium | An edge-case input leads to an error page or blank page |
+| `BROKEN_LINK` | medium | Same-origin link → 404 |
+| `DEAD_CONTROL` | medium | Click causes no DOM change, no navigation and no request |
+| `SLOW_RESPONSE` | low | Action takes > 5 s to settle |
+| `CONSOLE_ERROR` | low | `console.error` after an action |
+| `LAYOUT_OVERFLOW` | low | Horizontal overflow at 375 px |
+| `UNLABELED_CONTROL` | low | Interactive element without an accessible name |
+
+- Each finding: `code`, `severity`, element selector + visible text, action, input used, before/after screenshot refs, error text (sanitized, truncated).
+- **Airgap fairness:** a finding whose action window had a sinkhole/hook hit is tagged `airgap` and excluded from severity counts and from G6 (same as G2).
+- Identical findings (code + selector + action) are deduplicated; at most 50 per project.
+- **Coverage honesty:** receipt and board show "explored X of Y controls, Z pages, budget `<mode>`" and the skipped-destructive list. Never "fully tested".
 ---
  
 ## 8. Policy gate (deterministic, pre-execution)
@@ -427,13 +470,14 @@ Claim verdicts come from §7.4. Tiers are evaluated in order; first match wins. 
 |---|---|---|
 | 1 | 🔴 **Quarantined — needs human review** | Any hostile flag: `INJECTION_HIGH`, `CANARY_EXFIL`, `METADATA_PROBE`, `KNOWN_EXFIL_DOMAIN`, `PIDS_LIMIT_HIT` (Stage 2), `DISK_LIMIT_HIT` (Stage 2) |
 | 2 | ⚫ **Needs human — not runnable here** | No attempt booted · or `REQUIRES_DOCKER` · or every run path blocked by policy · or booted but 0 VERIFIED and 0 CONTRADICTED (all unverifiable, or no testable claims) |
-| 3 | 🟡 **Claim mismatch** | Booted and ≥ 1 claim CONTRADICTED |
+| 3 | 🟡 **Claim mismatch** | Booted and ≥ 1 claim CONTRADICTED (including via Explorer guard G6, §7.4) |
 | 4 | 🔵 **Runs after a small fix** | Attempt 1 failed, attempt 2 booted, ≥ 1 VERIFIED, 0 CONTRADICTED |
 | 5 | 🟢 **Verified** | Attempt 1 booted, ≥ 1 VERIFIED, 0 CONTRADICTED |
  
 **Fairness rules:** airgap-caused failures never count against a submission · probe mistakes are UNVERIFIABLE, not CONTRADICTED ·
 the out-of-the-box result is always shown next to any fix · quarantine is never disqualification · every tier is **proposed** until an organizer
-approves or overrides it (a separately signed approval record).
+approves or overrides it (a separately signed approval record) · Explorer findings (§7.5) never change a tier except through G6; everything else is shown
+in a separate **Robustness** column (counts by severity, excluding `airgap`, + coverage %).
  
 ---
  
@@ -464,6 +508,11 @@ Payload outline:
   "events": [{"ts": "…", "stage": "RUN", "code": "CANARY_EXFIL", "severity": "hostile", "detail": {}}],
   "canaries": {"OPENAI_API_KEY": "sk-proj-prc-…"},
   "claims": [{"claim_id": "c1", "verdict": "VERIFIED", "guard": null, "observed": "…", "evidence": []}],
+  "explore": {"mode": "quick", "budget": {"actions": 25, "pages": 8, "seconds": 60}, "actions_used": 25,
+              "coverage": {"controls_discovered": 0, "controls_exercised": 0, "pages": 0},
+              "skipped_destructive": [{"selector": "…", "text": "…", "reason": "live site safety"}],
+              "findings": [{"code": "CRASH", "severity": "high", "airgap": false, "selector": "…", "text": "…", "action": "fill",
+                            "input": "…", "shots": ["x3-before", "x3-after"], "error": "…", "claim_id": null}]},
   "tier": {"proposed": "VERIFIED", "rules_fired": ["T5"], "reasons": ["…"], "engine_version": "1.0"},
   "costs": {"inference_usd": 0.0, "compute_usd_est": 0.0, "wall_ms": 0},
   "artifacts": [{"name": "c1-after.png", "sha256": "…", "bytes": 0}],
@@ -492,7 +541,7 @@ Report "matched" or the differing fields. Without a lockfile, mark "unlocked dep
 `VULTR_INFERENCE_API_KEY`, `VULTR_INFERENCE_BASE_URL`, `TEXT_MODEL`, `TEXT_MODEL_FALLBACK`, `VISION_MODEL`, `PRICE_*`, `DAILY_INFERENCE_BUDGET_USD`,
 `JOB_TOKEN_CAP`, `GITHUB_TOKEN` (optional; fine-grained, public repositories read-only; used by the orchestrator for metadata only, never passed to fetch),
 `ADMIN_TOKEN`, `PUBLIC_BASE_URL`, `TRUSTED_PROXY_IPS`, `RECEIPT_SIGNING_KEY_PATH`, `RECEIPT_KEY_ID`, `VAULT_MASTER_KEY`, `SANDBOX_IMAGE`, `SANDBOX_RUNTIME`,
-`MAX_CONCURRENT_JOBS`, `MAX_CONCURRENT_LIVE`, `SLOT_ROOT`, `JOB_ROOT`, `VM_HOURLY_USD`, `RATE_*`, `AUDIT_DAILY_CAP`, `AUDIT_MAX_REPO_MB`.
+`MAX_CONCURRENT_JOBS`, `MAX_CONCURRENT_LIVE`, `EXPLORE_MODE`, `EXPLORE_LIVE_SUBMIT`, `STAGE2_WALL_S`, `EXPLORE_EXTRA_S_QUICK`, `EXPLORE_EXTRA_S_FULL`, `SLOT_ROOT`, `JOB_ROOT`, `VM_HOURLY_USD`, `RATE_*`, `AUDIT_DAILY_CAP`, `AUDIT_MAX_REPO_MB`.
 Enforcement: container env is built only in `orchestrator/sandbox/env.py`; a unit test fails if any class A key **name or value** appears in any container spec.
  
 ### 11.2 Class C — `site-credentials.env` grammar
@@ -549,7 +598,8 @@ When the slots are busy, public POSTs return `202` with the running job ids so t
  
 **SSE event types:** `stage {job, stage, status}` · `log {job, stream, line}` (≤ 20 lines/s/job, ≤ 400 chars/line) · `shot {job, label, url}` ·
 `gauge {job, mem_mb, mem_limit_mb, pids, pids_limit, disk_mb, disk_limit_mb, net, canary}` · `event {job, code, severity, summary}` ·
-`verdict {job, claim_id, verdict}` · `tier {job, tier, rules}` · `done {job}`.
+`verdict {job, claim_id, verdict}` · `finding {job, code, severity, airgap, summary}` · `explore {job, actions_used, actions_budget, controls_exercised, controls_discovered}` ·
+`tier {job, tier, rules}` · `done {job}`.
  
 ---
  
@@ -559,10 +609,10 @@ When the slots are busy, public POSTs return `202` with the running job ids so t
 - **Mission control (top):** four live cells (2×2 on desktop, stacked on phones). Each cell: title + `FIXTURE` label where relevant · stage chips (Fetch → Scan → Plan → Build → Run → Probe → Verify → Tier) ·
   latest screenshot · log tail (12 lines, monospace) · gauges MEM, PIDS, DISK, NET (**AIRGAPPED (verified)**), CANARY (**ARMED / TRIPPED**) · containment ticker in red
   ("Blocked before execution: `curl … | sh` (source: README)", "Sinkhole: http://exfil.proofrun.invalid — canary present", "PIDS 128/128 — fork bomb contained", "DISK 4.0/4.0 GB — ENOSPC").
-- **Cohort board (below):** name · proposed tier badge · **live badge (Mode L)** · approved? · boot (A1/A2) · claims (✓/✗/?) · flags · time · cost. Row → receipt drawer.
+- **Cohort board (below):** name · proposed tier badge · **live badge (Mode L)** · approved? · boot (A1/A2) · claims (✓/✗/?) · flags · **Robustness** (high/med/low counts + "explored X of Y controls, Z pages, `<mode>`") · time · cost. Row → receipt drawer.
   Must handle hundreds of rows: sort by tier, filter by tier / live badge / flag, paginate (100 rows/page), **CSV export** of results
   (client-side; cells starting with `= + - @` are prefixed with `'` to block formula injection).
-- **Receipt drawer tabs:** Summary (tier + rules + reasons) · Evidence (before/after side by side, claims matrix) · Fix (diff, labeled) · Containment (limits, peaks, events, canary status) ·
+- **Receipt drawer tabs:** Summary (tier + rules + reasons) · Evidence (before/after side by side, claims matrix) · Fix (diff, labeled) · Containment (limits, peaks, events, canary status) · Robustness (findings, coverage, skipped-destructive list) ·
   Agent (plan, probe code + AST gate result, models requested/returned, tokens, cost) · Receipt (raw JSON, signature, how to verify).
 - **Showroom is the default view:** the last recorded real batch loads instantly, labeled "Recorded run — <date> — signed; verify with the public key".
   Fixtures are labeled as purpose-built test repos.
@@ -618,7 +668,7 @@ The latch decides *whether* it attacks; containment is enforced by the kernel ei
 | 0:15–1:00 | F1 → 🟢 (probe clicks, before/after). F2 fails → Fixer diff → 🔵 (open the diff). F3 → click → HTTP 500 → 🟡. |
 | 1:00–1:45 | **Containment moment (F4):** README `curl \| sh` blocked before execution (our own agent contained) · injection flagged · canary exfil caught by the sinkhole · metadata probe · PIDS 128/128 · DISK 4/4 GB ENOSPC · 🔴 "needs human review" · host gauges calm. |
 | 1:45–2:20 | Open a receipt; verify its ed25519 signature live with `scripts/verify_receipt.py`. |
-| 2:20–2:45 | Space Apps scenario (§1): CSV import → live badges + tiers on the board. Measured time and cost from this run's receipts; any 600-entry figure labeled **"estimate, to be measured"** unless a recorded run backs it · architecture · Vultr services used (VM, Serverless Inference text + vision). |
+| 2:20–2:45 | Space Apps scenario (§1): CSV import → live badges + tiers + Robustness column on the board. Measured time and cost from this run's receipts; any 600-entry figure labeled **"estimate, to be measured"** unless a recorded run backs it · architecture · Vultr services used (VM, Serverless Inference text + vision). |
 | 2:45–3:00 | "AI proposes, organizers decide." Public URL — "press Detonate yourself." |
  
 Checklist: ☐ public GitHub repo with setup docs ☐ deployed on the Vultr VM ☐ public HTTPS URL with showroom ☐ 3-min video with the containment moment
@@ -634,11 +684,13 @@ Checklist: ☐ public GitHub repo with setup docs ☐ deployed on the Vultr VM �
 | Thu 5 Nov | Image, Stage 0/1/2 pod with a hardcoded plan, holder/sinkhole, hooks, canaries, telemetry, all four fixtures | `make test-containment` shows every F4 flag; F1 screenshot captured |
 | Fri 6 Nov | Policy gate + tests, Planner/Prober/Fixer/Verifier, guards, tier engine, receipts, job state machine, SSE | F1–F4 reach their expected tiers end-to-end; 3–5 real repos run |
 | Fri 6 Nov (late) | **S6b Mode L + CSV import** (~4–5 h): web-probe, SSRF guard, live badges, CSV import + validation | A test CSV with live + repo rows imports, rejected rows reported, badges shown |
+| Sat 7 Nov (early) | **S6c Explorer quick mode** (~4–5 h): `explorer.py`, findings, G6, coverage | Same app twice → same action order; F1 and a live URL produce findings + coverage in the receipt |
 | Sat 7 Nov | UI, public endpoints and limits, Caddy HTTPS, showroom recording, README · **freeze 18:00** · video and slides in the evening | Public URL works from a phone; video recorded |
 | Sun 8 Nov | Submit by **09:00**; buffer | Submission confirmed |
  
 **Cut order if behind:** (1) `/api/audit` · (2) board CSV export and filters (sort by tier stays) · (3) vendored skills · (4) drawer tabs beyond Summary/Evidence/Containment ·
-(5) real repos down to 3 · (6) Mode L (CSV import keeps repo rows) · (7) Fixer limited to `.env` creation.
+(5) real repos down to 3 · (6) Explorer full mode (P1 anyway) · (7) Explorer edge-case set (keep plain click-through) · (8) Mode L (CSV import keeps repo rows) ·
+(9) Fixer limited to `.env` creation.
 **Never cut:** pod airgap, policy gate, F4 detonation, signed receipts, vision verifier, showroom.
  
 ---
@@ -667,6 +719,7 @@ Checklist: ☐ public GitHub repo with setup docs ☐ deployed on the Vultr VM �
 | D18 | Mode L promoted to P0-light (no vault) | Most Space Apps entries have live demos |
 | D19 | CSV batch import in P0 | Real organizer workflow (~600 entries) |
 | D20 | Skills pinned at build time, not installed at runtime | Keeps the story, removes the injection/supply-chain risk |
+| D21 | Deterministic Explorer with equal budgets; findings are evidence, not penalties; destructive controls skipped on live sites | Fair, repeatable robustness signal; only G6 (high finding on a claimed feature) affects a verdict |
  
 ---
  
