@@ -1,8 +1,9 @@
 Spec · MD
-# ProofRun — Locked Spec v1.0
+# ProofRun — Locked Spec v1.1
  
 > **Status: LOCKED** on Wed 4 Nov 2026, 21:15 Asia/Dhaka. Owner: MHA.
 > Any change needs MHA's explicit OK and a new line in §18 (Decision log).
+> **v1.1** amended Thu 5 Nov 2026 with MHA's OK: D17–D20 (VM, Mode L P0-light, CSV import, pinned skills).
 > Hackathon: **Vultr: Agent Rush** (lablab.ai) · Track: **Blast Radius Zero** · Patterns **A + B**.
 > **Internal submission deadline: Sun 8 Nov 2026, 09:00 Asia/Dhaka.** The portal has shown conflicting
 > times (9:00 AM Bangladesh time, 6:00 PM EST, 22:00 UTC); 09:00 Dhaka is the earliest reading, so it is safe under all of them.
@@ -40,6 +41,12 @@ the user's own logged-in browser and remain prompt-injectable, so they can't saf
 | Fairness | Planted text can steer AI judges | Injection is reported as a finding; trivial setup mistakes get one labeled fix |
 | Trust | A black-box score | No score: rule-based tiers from evidence, signed receipts, human approval |
 | Time and cost | Manual setup per repo | Parallel; time and cost measured per job (numbers only from receipts) |
+
+**Motivating scenario.** Local NASA Space Apps judges must screen a large batch (~600) of submissions correctly within ~2 days.
+Most entries link a repo and a live demo. The organizer imports one CSV (§12); ProofRun checks every live URL (Mode L, §5.8) and runs
+the repos (Mode R), then judges work down a sortable, filterable cohort board instead of opening 600 links by hand.
+**Throughput is an ESTIMATE, to be measured:** with 4 slots, ~600 repo runs ≈ 12–13 h; live-URL checks are faster (no build).
+Never present these figures as results; only receipts from measured runs count.
  
 **Never claim:** "injection-proof", "replaces judges", "Vultr recommends gVisor", "detects every exfiltration attempt",
 or any number that wasn't measured in a recorded run.
@@ -57,13 +64,19 @@ or any number that wasn't measured in a recorded run.
 6. Job queue (4 slots), API, SSE, public rate limits, daily inference budget.
 7. Mission-control UI, cohort board, receipt drawer, showroom.
 8. Four fixtures + 3–5 real public repos; deployed on Vultr with HTTPS.
-**P1 — only after P0 is green and MHA says go:** Mode L (live-URL probe) with the site-login vault · replay with locked
-inputs · Stage 1 allowlist egress proxy · committed-secret scan.
+9. **Mode L live-URL probe, P0-light** (§5.8): web-probe container on `proofrun-web`, SSRF guard, live badges. No site-login vault, no secrets.
+10. **CSV batch import** (admin, §12) with per-row validation, and a cohort board that scales to hundreds of rows (§13).
+11. **1–2 agent skills vendored at build time** into `skills/vendor/<name>/` at a pinned commit; folded into the Prober prompt.
+    No runtime installation. Source, commit SHA and license in `skills/vendor/SOURCES.md`; MHA approves each one before it is vendored.
+    Vendored text is trusted-after-review (reviewed once by MHA or Claude); bundled scripts are **never executed**.
+**P1 — only after P0 is green and MHA says go:** Mode L site-login vault (`pr.login`, class C) · replay with locked
+inputs · Stage 1 allowlist egress proxy · committed-secret scan · runtime skill installer (allowlisted sources, pinned SHA,
+shown in receipts, human approval per install).
  
 **P2 — slides / "future work":** brokered API secrets for Mode R · "does the live demo come from this code?" match ·
 gVisor runtime · decoy credential files · TLS-inspecting sinkhole · private repos · Docker Compose submissions.
  
-**Out of scope (decided):** runtime skill installation · Obscura or any stealth/anti-detection browsing · CAPTCHA, SSO or
+**Out of scope (decided):** runtime skill installation in P0 (P1 only, see above) · Obscura or any stealth/anti-detection browsing · CAPTCHA, SSO or
 2FA automation · numeric LLM scores · auto-disqualification · AI-text "humanizing" or watermark removal · Kimi (not on
 Vultr Serverless Inference) · user accounts / multi-tenancy · Kubernetes.
  
@@ -118,6 +131,9 @@ Judge / organizer browser
 | Evidence | `orchestrator/evidence/{canary,sinkhole,flags,tiers,receipts}.py` | §6, §9, §10 |
 | Safe file reads | `orchestrator/safe_fs.py` | Bounded, no-symlink reads of workspace files |
 | Vault (P1) | `orchestrator/vault.py` | Class C credentials (§11) |
+| SSRF guard | `orchestrator/policy/ssrf.py` | Mode L URL resolution + IP checks (§5.8) |
+| CSV import | `orchestrator/batch_csv.py` | Parse + validate batch CSV (§12) |
+| Vendored skills | `skills/vendor/<name>/`, `skills/vendor/SOURCES.md` | Pinned build-time skills (§2 P0.11) |
 | Sandbox image | `sandbox/Dockerfile` | §5.1 |
 | In-sandbox code | `sandbox/harness/{holder.py,probe_runner.py}`, `sandbox/hooks/{net-hook.cjs,sitecustomize.py}` | Sinkhole, probe harness, hooks |
 | Web UI | `web/{index.html,app.js,styles.css}` | §13 |
@@ -171,7 +187,7 @@ kill on timeout · labels `proofrun.job=<id>`, `proofrun.stage=<stage>` · `runt
 | **holder** (Stage 2) | `none` | job `holder/` → `/out` rw | `/tmp` 16m | 0.25 CPU · 128 MB · pids 32 | — |
 | **app** (Stage 2) | `container:<holder>` | slot → `/workspace` rw | `/tmp` 256m noexec,nosuid · `/home/runner` 256m noexec,nosuid | 1 CPU · 1.5 GB (swap = mem) · **pids 128** · 100 s | app env (§6.2) |
 | **probe** (Stage 2) | `container:<holder>` | job `probe/` → `/out` rw; `probe.py` → `/probe/probe.py` ro | `/tmp` 256m, `/home/runner` 256m | 1 CPU · 1.5 GB · pids 512 · shm 512m · 60 s | probe env |
-| **web-probe** (Mode L, P1) | `proofrun-web` | job `probe/` → `/out` rw; bound creds → `/run/secrets/site.json` ro | `/tmp` 256m | 1 CPU · 1.5 GB · pids 512 · shm 512m · 90 s | — |
+| **web-probe** (Mode L, P0-light) | `proofrun-web` | job `probe/` → `/out` rw; (P1 only: bound creds → `/run/secrets/site.json` ro) | `/tmp` 256m | 1 CPU · 1.5 GB · pids 512 · shm 512m · 90 s | — |
  
 Notes:
 - Chromium lives in the probe container, not the app container, so the app's 128-PID cap stays meaningful and a fork bomb never takes the browser down.
@@ -184,12 +200,12 @@ and `git -C /workspace/src rev-parse HEAD` (commit SHA → receipt). **Fixtures:
 into `/workspace/src`; the "commit" is the SHA-256 of the fixture tarball. The host never runs git or package managers on submission code.
  
 ### 5.4 Host firewall — `deploy/firewall.sh` (idempotent; re-applied after `docker.service` starts)
-- Networks: `proofrun-build` (bridge name `pr-build`, IPv6 off). P1: `proofrun-web` (bridge `pr-web`, IPv6 off).
+- Networks: `proofrun-build` (bridge name `pr-build`, IPv6 off) and `proofrun-web` (bridge `pr-web`, IPv6 off; Mode L).
 - `DOCKER-USER`: for `-i pr-build` (and `pr-web`): RETURN on `ESTABLISHED,RELATED`, then DROP to
   `169.254.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 0.0.0.0/8, 127.0.0.0/8, 224.0.0.0/4, 240.0.0.0/4`.
 - `INPUT`: `-i pr-build -j DROP` (and `pr-web`). This blocks sandbox → host (SSH, orchestrator, Caddy) via the gateway **or** the host's public IP; `DOCKER-USER` alone doesn't cover traffic addressed to the host itself.
 - Host: orchestrator on `127.0.0.1:8000` only; Caddy on `:80/:443`; SSH key-only; no container ever publishes a port.
-- `make test-firewall` must show, from a `proofrun-build` container: `169.254.169.254`, `10.0.0.1`, the bridge gateway, and the host public IP on 22/443 all **fail**; `https://registry.npmjs.org` and `https://pypi.org` **work**; DNS works.
+- `make test-firewall` must show, from a `proofrun-build` **and** a `proofrun-web` container: `169.254.169.254`, `10.0.0.1`, the bridge gateway, and the host public IP on 22/443 all **fail**; `https://registry.npmjs.org` and `https://pypi.org` **work**; DNS works.
 ### 5.5 Slot disks
 Four 4 GB ext4 image files (`deploy/slots-init.sh`), mounted `nodev,nosuid` at `/var/lib/proofrun/slots/{0..3}`, owned by 10001.
 Reset after every job and between attempts with `sudo /usr/local/sbin/proofrun-slot-reset <n>` (unmount → `mkfs.ext4 -F -q` → mount → chown).
@@ -203,6 +219,26 @@ That script is the **only** sudo rule for the `proofrun` user.
 ### 5.7 Stage 2 pod order
 Start: holder (sinkhole up, writes `READY`) → app (start command) → probe (waits for the port, runs the probe).
 Stop (done or timeout): probe → app → holder → slot reset.
+
+### 5.8 Mode L — live-URL check (P0-light)
+- **No submission code runs and no secrets are used.** One `web-probe` container (§5.3, hardening §5.2) on `proofrun-web`, same
+  firewall drop-list as `pr-build` (§5.4). No slot disk. Concurrency `MAX_CONCURRENT_LIVE` (default 4), separate from the 4 repo slots.
+- **SSRF guard (orchestrator, before launch):** URL must be `http(s)://<host>[:port]/…`, no userinfo. Resolve the host on the orchestrator;
+  reject if **any** resolved IP is private, loopback, link-local, metadata (`169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`),
+  CGNAT (`100.64.0.0/10`), unspecified, multicast or reserved (same set as §5.4). The harness repeats the check on **every redirect** and
+  every top-level navigation; a rejected hop stops the run. The firewall drop-list is the kernel backstop (e.g. DNS rebinding).
+- **Flow:** harness loads the URL (≤ 30 s) → baseline DOM summary → injection scan on DOM text (§6.6) → Prober writes the probe (same AST gate §8.3;
+  `page.goto` paths are prefixed with the **live origin** instead of localhost) → harness runs it → Verifier (§7.4; G2 doesn't apply, Mode L has internet).
+  Claims come from the CSV `description` (organizer-provided, still sanitized and wrapped as untrusted) or, if empty, from the landing page.
+- **Live badges** (rules only, in `evidence/tiers.py`, first match wins). Shown next to the repo tier; they **never change** the §9 tier rules.
+
+| Badge | Condition |
+|---|---|
+| ❌ **DEAD LINK** | DNS failure, connection/TLS error, timeout, or final HTTP status ≥ 400 on the landing page (except 401/403) |
+| 🔒 **NEEDS LOGIN** | 401/403, a password field on the landing page, or a redirect to a login/SSO page. Never automated (vault is P1) |
+| 🟡 **LIVE MISMATCH** | Loaded and ≥ 1 claim CONTRADICTED |
+| ✅ **LIVE OK** | Loaded, ≥ 1 VERIFIED, 0 CONTRADICTED |
+| ⚫ **UNVERIFIABLE** | Anything else (all claims unverifiable, no testable claims, SSRF-rejected, infra error, budget exhausted) |
  
 ---
  
@@ -312,6 +348,7 @@ README (sanitized, ≤ 12 KB), organizer-provided claims if any.
 ### 7.2 Prober → probe code (Pattern A inside Pattern B)
 Input: claims, port, baseline DOM summary (≤ 150 interactive elements: role, accessible name, tag, CSS path) from the harness's first page load.
 Output: Python source with exactly one `async def probe(page, pr):`. Validated by the AST gate (§8.3), run by `probe_runner.py`.
+Vendored skill text (§2 P0.11) is appended to the Prober's system prompt as trusted guidance; its name + commit SHA go into the receipt.
 Harness API `pr`: `pr.claim(id)` (async context manager; harness auto-captures before/after shots, console, page errors, failed requests per claim) ·
 `pr.shot(label)` · `pr.expect_visible(locator)` · `pr.expect_text(text)` · `pr.sample_file(kind)` (`csv|png|pdf|txt`, baked files) · `pr.login(alias)` (Mode L, P1).
 The harness also records which port actually answered (candidate scan: plan port, 3000, 5000, 5173, 8000, 8080, 8501, 4321) — "README said 5000, app listened on 8080" is evidence.
@@ -412,8 +449,10 @@ Payload outline:
 {
   "schema": "proofrun.receipt/v1",
   "job_id": "…", "batch_id": "…", "created_at": "…",
-  "source": {"kind": "github|fixture", "url": "…", "fixture": null, "commit_sha": "…"},
-  "environment": {"image_digest": "sha256:…", "runtime": "runc", "vm_plan": "…", "policy_version": "1.0", "limits": {}},
+  "source": {"kind": "github|fixture|live_url", "url": "…", "fixture": null, "commit_sha": "…"},
+  "live": {"url": "…", "final_url": "…", "resolved_ips": [], "http_status": 200, "badge": "LIVE_OK"},
+  "environment": {"image_digest": "sha256:…", "runtime": "runc", "vm_plan": "…", "policy_version": "1.0", "limits": {},
+                  "skills": [{"name": "…", "repo": "…", "commit": "…"}]},
   "agents": {
     "planner":  {"model_requested": "…", "model_returned": "…", "prompt_sha256": "…", "tokens": {"in": 0, "out": 0}, "output": {}},
     "prober":   {"…": "…", "code_sha256": "…", "ast_gate": "PASS|BLOCKED"},
@@ -453,7 +492,7 @@ Report "matched" or the differing fields. Without a lockfile, mark "unlocked dep
 `VULTR_INFERENCE_API_KEY`, `VULTR_INFERENCE_BASE_URL`, `TEXT_MODEL`, `TEXT_MODEL_FALLBACK`, `VISION_MODEL`, `PRICE_*`, `DAILY_INFERENCE_BUDGET_USD`,
 `JOB_TOKEN_CAP`, `GITHUB_TOKEN` (optional; fine-grained, public repositories read-only; used by the orchestrator for metadata only, never passed to fetch),
 `ADMIN_TOKEN`, `PUBLIC_BASE_URL`, `TRUSTED_PROXY_IPS`, `RECEIPT_SIGNING_KEY_PATH`, `RECEIPT_KEY_ID`, `VAULT_MASTER_KEY`, `SANDBOX_IMAGE`, `SANDBOX_RUNTIME`,
-`MAX_CONCURRENT_JOBS`, `SLOT_ROOT`, `JOB_ROOT`, `VM_HOURLY_USD`, `RATE_*`, `AUDIT_DAILY_CAP`, `AUDIT_MAX_REPO_MB`.
+`MAX_CONCURRENT_JOBS`, `MAX_CONCURRENT_LIVE`, `SLOT_ROOT`, `JOB_ROOT`, `VM_HOURLY_USD`, `RATE_*`, `AUDIT_DAILY_CAP`, `AUDIT_MAX_REPO_MB`.
 Enforcement: container env is built only in `orchestrator/sandbox/env.py`; a unit test fails if any class A key **name or value** appears in any container spec.
  
 ### 11.2 Class C — `site-credentials.env` grammar
@@ -491,12 +530,21 @@ Enforcement: container env is built only in `orchestrator/sandbox/env.py`; a uni
 | POST | `/api/detonate` | public | `RATE_DETONATE_PER_IP_HOUR` | Fixture F4 |
 | POST | `/api/audit` | public | `RATE_AUDIT_PER_IP_HOUR` · `AUDIT_DAILY_CAP` · size cap · 1 concurrent | Any public GitHub repo |
 | POST | `/api/batches` | admin | — | `{items: [{id, repo_url? \| fixture?, live_url?, claims?}]}` |
+| POST | `/api/batches/csv?repo_run=all\|dead-links\|none` | admin | ≤ 2 MB · ≤ 1000 rows | CSV batch import (below) |
 | POST | `/api/jobs/{id}/approve` | admin | — | `{decision, tier?, note}` |
 | POST | `/api/jobs/{id}/replay` | admin | P1 | Replay with locked inputs |
 | GET | `/.well-known/proofrun-receipt-key` | public | — | Public key + key id |
 | GET | `/healthz` | public | — | Liveness |
  
 Admin = `Authorization: Bearer <ADMIN_TOKEN>`. Client IP from `X-Forwarded-For` only when the peer is in `TRUSTED_PROXY_IPS`.
+
+**CSV batch import** (`POST /api/batches/csv` or `python -m orchestrator.cli batch import <file.csv> [--repo-run all|dead-links|none]`, default `all`):
+- Header must be exactly `id,team,repo_url,live_url,description` (UTF-8, RFC 4180). Wrong header → whole file rejected.
+- Per row: `id` `[A-Za-z0-9_-]{1,64}`, unique · `team` ≤ 100 chars · `repo_url` matches the §5.3 GitHub regex · `live_url` passes the §5.8 URL syntax check
+  (SSRF resolution happens at run time) · at least one of `repo_url`/`live_url` · `description` ≤ 2000 chars → organizer-provided claims for Planner/Prober (still sanitized, untrusted).
+- Every row is validated before anything is queued. The response/CLI output lists accepted rows and **every rejected row with row number and reason**; no silent drops.
+- Runs: a live-URL check for every row with `live_url`; a repo run per `--repo-run`: `all` = every row with `repo_url`; `dead-links` = rows with `repo_url` whose
+  live badge is ❌ DEAD LINK or that have no `live_url`; `none` = no repo runs. Daily inference budget still applies; exhausted → `BUDGET_EXHAUSTED` → UNVERIFIABLE.
 When the slots are busy, public POSTs return `202` with the running job ids so the viewer joins `/api/live`.
  
 **SSE event types:** `stage {job, stage, status}` · `log {job, stream, line}` (≤ 20 lines/s/job, ≤ 400 chars/line) · `shot {job, label, url}` ·
@@ -511,7 +559,9 @@ When the slots are busy, public POSTs return `202` with the running job ids so t
 - **Mission control (top):** four live cells (2×2 on desktop, stacked on phones). Each cell: title + `FIXTURE` label where relevant · stage chips (Fetch → Scan → Plan → Build → Run → Probe → Verify → Tier) ·
   latest screenshot · log tail (12 lines, monospace) · gauges MEM, PIDS, DISK, NET (**AIRGAPPED (verified)**), CANARY (**ARMED / TRIPPED**) · containment ticker in red
   ("Blocked before execution: `curl … | sh` (source: README)", "Sinkhole: http://exfil.proofrun.invalid — canary present", "PIDS 128/128 — fork bomb contained", "DISK 4.0/4.0 GB — ENOSPC").
-- **Cohort board (below):** name · proposed tier badge · approved? · boot (A1/A2) · claims (✓/✗/?) · flags · time · cost. Row → receipt drawer.
+- **Cohort board (below):** name · proposed tier badge · **live badge (Mode L)** · approved? · boot (A1/A2) · claims (✓/✗/?) · flags · time · cost. Row → receipt drawer.
+  Must handle hundreds of rows: sort by tier, filter by tier / live badge / flag, paginate (100 rows/page), **CSV export** of results
+  (client-side; cells starting with `= + - @` are prefixed with `'` to block formula injection).
 - **Receipt drawer tabs:** Summary (tier + rules + reasons) · Evidence (before/after side by side, claims matrix) · Fix (diff, labeled) · Containment (limits, peaks, events, canary status) ·
   Agent (plan, probe code + AST gate result, models requested/returned, tokens, cost) · Receipt (raw JSON, signature, how to verify).
 - **Showroom is the default view:** the last recorded real batch loads instantly, labeled "Recorded run — <date> — signed; verify with the public key".
@@ -524,9 +574,10 @@ When the slots are busy, public POSTs return `202` with the running job ids so t
  
 ## 14. Deployment (Vultr)
  
-- **VM:** Cloud Compute **High Frequency, 8 vCPU / 32 GB / 512 GB NVMe**, Ubuntu 24.04, a US region (for example Los Angeles or Seattle, near the Salt Lake City finale).
-  List price ≈ $0.286/hr on vultr.com/pricing (≈ $35 for five days); confirm in the console. Fallback: Optimized General Purpose 8 vCPU / 32 GB.
-- **Memory budget:** 4 jobs × (app 1.5 + probe 1.5 + holder 0.13 GB) ≈ 12.5 GB, or up to 12 GB if all four are building (3 GB each), plus orchestrator and OS — fits in 32 GB.
+- **VM:** Dedicated CPU **VX1 `vx1-g-8c-32g-480s`** — 8 vCPU / 32 GB / 480 GB local NVMe, Ubuntu 24.04, **Atlanta**.
+  $0.306/hr (≈ $7.3/day; confirmed in the console). `VM_HOURLY_USD=0.306`.
+- **Memory budget:** 4 jobs × (app 1.5 + probe 1.5 + holder 0.13 GB) ≈ 12.5 GB, or up to 12 GB if all four are building (3 GB each),
+  + 4 live checks × 1.5 GB = 6 GB, plus orchestrator and OS — ≈ 19 GB, fits in 32 GB.
 - **Development happens on this VM.** MHA's laptop has 4 GB RAM, so no local Docker or Chromium; the laptop is a terminal and a browser.
 - **Layout:** code `/opt/proofrun` · config `/etc/proofrun/control.env` · keys `/etc/proofrun/keys/` · data `/var/lib/proofrun/{slots,jobs,proofrun.db,vault.db}`.
 - **Users:** `proofrun` system user in the `docker` group (root-equivalent — accepted for a single-purpose VM); SSH key-only admin login.
@@ -567,7 +618,7 @@ The latch decides *whether* it attacks; containment is enforced by the kernel ei
 | 0:15–1:00 | F1 → 🟢 (probe clicks, before/after). F2 fails → Fixer diff → 🔵 (open the diff). F3 → click → HTTP 500 → 🟡. |
 | 1:00–1:45 | **Containment moment (F4):** README `curl \| sh` blocked before execution (our own agent contained) · injection flagged · canary exfil caught by the sinkhole · metadata probe · PIDS 128/128 · DISK 4/4 GB ENOSPC · 🔴 "needs human review" · host gauges calm. |
 | 1:45–2:20 | Open a receipt; verify its ed25519 signature live with `scripts/verify_receipt.py`. |
-| 2:20–2:45 | Measured time and cost from this run's receipts · architecture · Vultr services used (VM, Serverless Inference text + vision). |
+| 2:20–2:45 | Space Apps scenario (§1): CSV import → live badges + tiers on the board. Measured time and cost from this run's receipts; any 600-entry figure labeled **"estimate, to be measured"** unless a recorded run backs it · architecture · Vultr services used (VM, Serverless Inference text + vision). |
 | 2:45–3:00 | "AI proposes, organizers decide." Public URL — "press Detonate yourself." |
  
 Checklist: ☐ public GitHub repo with setup docs ☐ deployed on the Vultr VM ☐ public HTTPS URL with showroom ☐ 3-min video with the containment moment
@@ -582,10 +633,12 @@ Checklist: ☐ public GitHub repo with setup docs ☐ deployed on the Vultr VM �
 | Wed 4 Nov (tonight) | Day 0: VM, bootstrap, firewall, slots, keys, Inference smoke (text + vision), repo skeleton with CLAUDE.md and this spec, 30-min gVisor experiment | `make smoke-inference` and `make test-firewall` pass |
 | Thu 5 Nov | Image, Stage 0/1/2 pod with a hardcoded plan, holder/sinkhole, hooks, canaries, telemetry, all four fixtures | `make test-containment` shows every F4 flag; F1 screenshot captured |
 | Fri 6 Nov | Policy gate + tests, Planner/Prober/Fixer/Verifier, guards, tier engine, receipts, job state machine, SSE | F1–F4 reach their expected tiers end-to-end; 3–5 real repos run |
+| Fri 6 Nov (late) | **S6b Mode L + CSV import** (~4–5 h): web-probe, SSRF guard, live badges, CSV import + validation | A test CSV with live + repo rows imports, rejected rows reported, badges shown |
 | Sat 7 Nov | UI, public endpoints and limits, Caddy HTTPS, showroom recording, README · **freeze 18:00** · video and slides in the evening | Public URL works from a phone; video recorded |
 | Sun 8 Nov | Submit by **09:00**; buffer | Submission confirmed |
  
-**Cut order if behind:** (1) `/api/audit` · (2) drawer tabs beyond Summary/Evidence/Containment · (3) real repos down to 3 · (4) Fixer limited to `.env` creation.
+**Cut order if behind:** (1) `/api/audit` · (2) board CSV export and filters (sort by tier stays) · (3) vendored skills · (4) drawer tabs beyond Summary/Evidence/Containment ·
+(5) real repos down to 3 · (6) Mode L (CSV import keeps repo rows) · (7) Fixer limited to `.env` creation.
 **Never cut:** pod airgap, policy gate, F4 detonation, signed receipts, vision verifier, showroom.
  
 ---
@@ -610,6 +663,10 @@ Checklist: ☐ public GitHub repo with setup docs ☐ deployed on the Vultr VM �
 | D14 | Prober writes Python checked by an AST allowlist | Real code generation (Pattern A) with a visible pre-execution gate |
 | D15 | Class C credentials via CLI import into an encrypted vault; values never reach an LLM or submission code | User asked for credentials as env; this is the safe shape |
 | D16 | Fixtures live in the main repo with a safety latch and `.invalid` domains | Deterministic demo without publishing a runnable malicious repo |
+| D17 | VM = Dedicated CPU VX1 `vx1-g-8c-32g-480s`, Atlanta, $0.306/hr, local NVMe | Replaces the High Frequency plan in §14; same 8 vCPU / 32 GB budget |
+| D18 | Mode L promoted to P0-light (no vault) | Most Space Apps entries have live demos |
+| D19 | CSV batch import in P0 | Real organizer workflow (~600 entries) |
+| D20 | Skills pinned at build time, not installed at runtime | Keeps the story, removes the injection/supply-chain risk |
  
 ---
  

@@ -2,12 +2,13 @@
 
 ## Read first
 1. `CLAUDE.md` — how to work here, the security invariants, slices S1–S10.
-2. `docs/SPEC.md` — **locked** spec. Don't redesign; ask MHA before any change (add a row to §18).
+2. `docs/SPEC.md` (currently at repo root: `SPEC.md`) — **locked** spec **v1.1**. Don't redesign; ask MHA before any change (add a row to §18).
 
 ## Where we are
 - Architecture and spec: **done and locked** (1.5 days of design; don't reopen it).
 - Repo: https://github.com/kmmohaimenulhaque-code/Vultr-comp — contains `CLAUDE.md`, `docs/SPEC.md`, `deploy/*.example`, this file. **No code yet.**
-- Pending small edit if not done yet: SPEC §14 VM line → VX1 `vx1-g-8c-32g-480s`, Atlanta, $0.306/hr; `VM_HOURLY_USD=0.306` in `deploy/control.env.example`; decision D17.
+- Spec v1.1 applied (Thu 5 Nov, MHA OK): **D17** VM → VX1 (§14, `VM_HOURLY_USD=0.306`) · **D18** Mode L live-URL check promoted to P0-light (§5.8; no vault, no secrets, SSRF guard, live badges) · **D19** CSV batch import in P0 (§12, board scales to hundreds of rows) · **D20** 1–2 skills vendored at build time, pinned (§2 P0.11). Motivating example: Space Apps judges screening ~600 entries in ~2 days (throughput = estimate, to be measured).
+- Skill candidate (not vendored yet, needs MHA OK in S6): `anthropics/skills` → `skills/webapp-testing`, Apache-2.0, commit `ca45fc496a3436251f191354091d557da31c15b5`.
 - VM: **`vx1-g-8c-32g-480s`** (8 vCPU / 32 GB / 480 GB local NVMe, Dedicated CPU VX1, Atlanta, Ubuntu 24.04, SSH key). Being deployed by MHA; IP not shared yet.
 - Vultr Serverless Inference: subscription created (label `proofrun`). Key is with MHA — it goes **only** into `/etc/proofrun/control.env` on the VM. Never paste it in chat or git.
 - Models: Planner/Prober/Fixer `deepseek-v4.1-flash-1017` ($0.15/$0.60 per 1M); Verifier `nemotron-3-nano-omni-30b-a3b-reasoning` ($0.10/$0.25, **1 image per request**). Prices confirmed in console.
@@ -21,8 +22,8 @@
 6. Verify on the VM and tick in CLAUDE.md §13: cgroup `pids.events` path · tmpfs writable by uid 10001 · DNS still works after firewall.
 
 ## Schedule (Dhaka) — ~10–12 focused h/day, 7 h sleep
-Thu night S1–S2 · Fri S3–S6 · Sat S7–S10, **freeze 18:00**, then video + slides · **Submit Sun 8 Nov by 09:00**.
-Behind schedule → cut order in SPEC §17. Never cut: pod airgap, policy gate, evil detonation, signed receipts, vision verifier, showroom.
+Thu night S1–S2 · Fri S3–S6 + **S6b Mode L + CSV import (~4–5 h)** · Sat S7–S10, **freeze 18:00**, then video + slides · **Submit Sun 8 Nov by 09:00**.
+Behind schedule → cut order in SPEC §17 (board CSV export/filters and vendored skills go before Mode L itself). Never cut: pod airgap, policy gate, evil detonation, signed receipts, vision verifier, showroom.
 
 ## Open checks
 - Billing: confirm Serverless Inference invoices are paid from the $200 credit.
@@ -37,4 +38,4 @@ Behind schedule → cut order in SPEC §17. Never cut: pod airgap, policy gate, 
 - GitHub push access from cloud sessions wasn't enabled before; on the VM, MHA's own git credentials or a deploy key are needed.
 
 ## Already decided — don't revisit
-No 128 GB VM · no runtime skill installer · no Obscura/stealth · no CAPTCHA/SSO automation · no numeric LLM scores · no Kimi · credentials model = SPEC §11 (classes A–D).
+No 128 GB VM · no runtime skill installer in P0 (P1, pinned + approved) · no Mode L login vault in P0 · no Obscura/stealth · no CAPTCHA/SSO automation · no numeric LLM scores · no Kimi · credentials model = SPEC §11 (classes A–D).

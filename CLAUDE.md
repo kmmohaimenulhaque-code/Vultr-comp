@@ -87,10 +87,10 @@ proofrun/
 ├─ README.md                 public: problem, demo, architecture, containment model, limitations, setup (Day 3)
 ├─ Makefile · pyproject.toml · .gitignore
 ├─ orchestrator/
-│  ├─ main.py  config.py  jobs.py  queue.py  db.py  models.py  safe_fs.py  cli.py  vault.py(P1)
+│  ├─ main.py  config.py  jobs.py  queue.py  db.py  models.py  safe_fs.py  cli.py  batch_csv.py  vault.py(P1)
 │  ├─ sandbox/   driver.py  env.py  slots.py  telemetry.py
 │  ├─ agents/    llm.py  planner.py  prober.py  fixer.py  verifier.py  prompts/{planner,prober,fixer,verifier}.md
-│  ├─ policy/    commands.py  readme_blocks.py  probe_ast.py  patch.py  scan.py  hosts.yaml
+│  ├─ policy/    commands.py  readme_blocks.py  probe_ast.py  patch.py  scan.py  ssrf.py  hosts.yaml
 │  └─ evidence/  canary.py  sinkhole.py  flags.py  tiers.py  receipts.py
 ├─ sandbox/
 │  ├─ Dockerfile
@@ -98,6 +98,7 @@ proofrun/
 │  ├─ hooks/     net-hook.cjs  sitecustomize.py
 │  └─ samples/   sample.csv  sample.png  sample.pdf  sample.txt
 ├─ fixtures/     clean/  broken-env/  vaporware/  evil-submission/   (each with FIXTURE.md)
+├─ skills/vendor/ <name>/ (pinned build-time skills, scripts never executed) · SOURCES.md (repo, commit SHA, license)
 ├─ web/          index.html  app.js  styles.css
 ├─ showroom/     recorded, signed jobs (receipt + artifacts) — committed
 ├─ deploy/       bootstrap.sh  firewall.sh  slots-init.sh  slot-reset.sh  proofrun.service
@@ -119,7 +120,8 @@ Work top to bottom. A slice is done only when its check passes; then commit and 
 | S3 | Driver: Stage 0/1/2 with a **hardcoded** plan for `fixture:clean`; telemetry; slot reset | §5, §6.5 | F1 runs end-to-end without LLMs; gauges stream; slot is wiped after |
 | S4 | Detection: hooks, canaries, sinkhole parsing, `pids.events`, disk, OOM, injection scan, flags | §6 | `make test-containment` on F4 reports `INJECTION_HIGH, CANARY_EXFIL, CANARY_IN_OUTPUT, METADATA_PROBE, PIDS_LIMIT_HIT, DISK_LIMIT_HIT, POLICY_BLOCKED(readme)`; host load/disk unaffected |
 | S5 | Policy gate: commands, README blocks, probe AST, patch — with tests | §8 | Unit tests: every rule has a malicious and a benign case |
-| S6 | Agents: `llm.py` (model check, cost, budget, mock mode), Planner, Prober, Fixer, Verifier + guards | §7 | Mock-mode tests pass; live run: F1 🟢, F2 🔵, F3 🟡, F4 🔴 |
+| S6 | Agents: `llm.py` (model check, cost, budget, mock mode), Planner, Prober, Fixer, Verifier + guards; vendor 1–2 pinned skills (MHA approves each) | §7, §2 P0.11 | Mock-mode tests pass; live run: F1 🟢, F2 🔵, F3 🟡, F4 🔴 |
+| S6b | Mode L + CSV import (~4–5 h): web-probe on `proofrun-web`, `policy/ssrf.py`, live badges in `tiers.py`, `batch_csv.py` + CLI + `POST /api/batches/csv` | §5.8, §12 | SSRF unit tests (private/loopback/link-local/metadata/CGNAT + redirect) fail closed; badge table tests; a test CSV imports with every rejected row reported |
 | S7 | Tier engine, receipts (sign/verify), approvals, job state machine, SQLite | §4, §9, §10 | Table tests for every tier rule; `verify_receipt.py` validates a real receipt and rejects a tampered one |
 | S8 | API, SSE, queue, rate limits, budget | §12 | Showdown runs 4 jobs in parallel; 5th request gets 202 + live ids; limits enforced |
 | S9 | Web UI: mission control, board, drawer, showroom, approve | §13 | Usable on a phone; no `innerHTML` with dynamic data; CSP active |
@@ -172,6 +174,8 @@ Required unit tests (must exist before the related slice is "done"):
 - `safe_fs`: symlink to `/etc/passwd` is refused; `..` escapes refused; size cap enforced.
 - `evidence.tiers`: one table test per tier rule + fairness rules (airgap → UNVERIFIABLE; probe error → UNVERIFIABLE).
 - `evidence.receipts`: sign → verify round trip; one-byte tamper fails; canonicalization stable.
+- `policy.ssrf`: private, loopback, link-local, metadata, CGNAT, IPv6 equivalents and a redirect to any of them are rejected; a public host passes.
+- `batch_csv`: wrong header rejects the file; each bad row (id, URL, missing both URLs, oversize description, duplicate id) is reported with row number; good rows still listed.
 - `agents.verifier` guards G1–G5 with mocked model outputs (including a model that says VERIFIED when G3 applies).
 Integration (needs Docker on the VM): `pod-hello`, `test-containment`, `showdown` with `MOCK_LLM=1` and with the real API.
 Run `make lint test` before every commit; run integration tests before marking a slice done.
@@ -199,7 +203,8 @@ Design tokens on `:root` with a dark theme; responsive grid (2×2 cells → stac
 - [ ] S3 Driver with hardcoded plan (F1)
 - [ ] S4 Detection + test-containment (F4)
 - [ ] S5 Policy gate + tests
-- [ ] S6 Agents + guards (F1 🟢 · F2 🔵 · F3 🟡 · F4 🔴)
+- [ ] S6 Agents + guards (F1 🟢 · F2 🔵 · F3 🟡 · F4 🔴) · pinned skills vendored (MHA-approved)
+- [ ] S6b Mode L (P0-light) + CSV import · SSRF guard · live badges
 - [ ] S7 Tiers · receipts · approvals · state machine
 - [ ] S8 API · SSE · queue · limits
 - [ ] S9 Web UI
@@ -215,7 +220,8 @@ Design tokens on `:root` with a dark theme; responsive grid (2×2 cells → stac
 - **Canary** — fake, per-job secret in the app env; seeing it leave = `CANARY_EXFIL`.
 - **Attempt 1 / 2** — out-of-the-box run / run after the single Fixer patch.
 - **Tier** — 🔴 Quarantined · ⚫ Needs human · 🟡 Claim mismatch · 🔵 Runs after a small fix · 🟢 Verified (SPEC §9). Always "Proposed" until approved.
-- **Mode R / Mode L** — repo run (P0) / live-URL probe (P1).
+- **Mode R / Mode L** — repo run (P0) / live-URL check (P0-light; site-login vault is P1).
+- **Live badge** — Mode L result: ✅ LIVE OK · 🟡 LIVE MISMATCH · ❌ DEAD LINK · 🔒 NEEDS LOGIN · ⚫ UNVERIFIABLE. Shown beside the tier; never changes it.
 
 ## graphify
 
