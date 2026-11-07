@@ -1,4 +1,10 @@
-# Python
+# Environment & secrets
+control.env
+site-credentials.env
+*.pem
+!docs/receipt-public-key.pem
+
+# Python & build
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,55 +25,28 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
-
-# Virtual environments
-.env
-.venv
+.venv/
 env/
 venv/
 ENV/
-env.bak/
-venv.bak/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Project specific
+# Data & local runtime
+/data/
 *.db
-*.sqlite3
-control.env
-site-credentials.env
-keys/*.pem
-!keys/receipt_ed25519.pem
-!docs/receipt-public-key.pem
+*.db-journal
+/var/lib/proofrun/
+/etc/proofrun/
+slots/
+jobs/
 
-# Logs and temp
-*.log
-tmp/
-temp/
-.cache/
-
-# Test / coverage
+# Testing & linting
+.pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
-.pytest_cache/
-.tox/
-.nox/
 
-# Jupyter
-.ipynb_checkpoints
-
-# mypy / type checkers
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.pytype/
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

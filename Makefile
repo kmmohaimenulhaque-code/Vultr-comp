@@ -1,20 +1,39 @@
-.PHONY: install test smoke showroom keygen clean
+# ProofRun Automation Targets
 
-install:
-	python -m pip install -e ".[dev]"
+.PHONY: setup image lint test test-firewall pod-hello test-containment smoke-inference dev showdown showroom check-secrets
+
+setup:
+	python3 -m venv .venv && .venv/bin/pip install -e .
+
+image:
+	docker build -t proofrun-sandbox:latest -f sandbox/Dockerfile .
+
+lint:
+	ruff check .
 
 test:
-	python tests/run_tests.py
+	PYTHONPATH=. python3 tests/run_tests.py
 
-smoke:
-	python scripts/smoke_inference.py
+test-firewall:
+	bash deploy/firewall.sh
+
+pod-hello:
+	PYTHONPATH=. python3 scripts/smoke_inference.py
+
+test-containment:
+	PYTHONPATH=. python3 -c "import asyncio; from orchestrator.jobs import JobRunner; asyncio.run(JobRunner('test-evil', {'kind': 'fixture', 'fixture': 'evil-submission'}).run())"
+
+smoke-inference:
+	PYTHONPATH=. python3 scripts/smoke_inference.py
+
+dev:
+	PYTHONPATH=. uvicorn orchestrator.main:app --host 127.0.0.1 --port 8000 --reload
+
+showdown:
+	PYTHONPATH=. python3 -m orchestrator.cli showdown
 
 showroom:
-	python scripts/record_showroom.py
+	PYTHONPATH=. python3 scripts/record_showroom.py
 
-keygen:
-	python scripts/keygen.py
-
-clean:
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	rm -rf .pytest_cache .mypy_cache *.egg-info dist build
+check-secrets:
+	PYTHONPATH=. python3 scripts/check_secrets.py
