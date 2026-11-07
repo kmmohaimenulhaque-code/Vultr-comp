@@ -1,0 +1,10 @@
+:80, :443 {
+    reverse_proxy 127.0.0.1:8000 {
+        flush_interval -1
+    }
+    header {
+        Content-Security-Policy "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none';"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+    }
+}

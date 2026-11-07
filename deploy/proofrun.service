@@ -1,0 +1,14 @@
+[Unit]
+Description=ProofRun Orchestrator
+After=network.target docker.service
+
+[Service]
+Type=simple
+User=proofrun
+WorkingDirectory=/opt/proofrun
+EnvironmentFile=/etc/proofrun/control.env
+ExecStart=/opt/proofrun/.venv/bin/uvicorn orchestrator.main:app --host 127.0.0.1 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
