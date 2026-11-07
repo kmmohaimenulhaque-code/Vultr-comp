@@ -1,0 +1,11 @@
+[Unit]
+Description=ProofRun Host Firewall
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/proofrun/deploy/firewall.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

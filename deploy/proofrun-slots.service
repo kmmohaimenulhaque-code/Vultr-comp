@@ -1,0 +1,11 @@
+[Unit]
+Description=ProofRun Slot Disks
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/proofrun/deploy/slots-init.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
